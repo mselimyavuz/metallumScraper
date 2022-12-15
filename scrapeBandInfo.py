@@ -4,12 +4,7 @@ import json
 import csv
 import sys
 import datetime
-
-switch = {'Full-length': 'album', 'Single': 'single', 'Demo': 'demo', 'EP': 'other', 'Split': 'other', 'Compilation': 'other', 'Boxed set': 'other'}
-totalPersonnelData = []
-
-def getTime():
-    return datetime.datetime.now()
+import time
 
 def writeFile(info, fileName):
     with open(fileName, 'w') as jsonFile:
@@ -21,15 +16,30 @@ def readFile(fileName):
         data = json.load(jsonFile)
 
         # Print the type of data variable
-        print(f'File loaded as {type(data)}')
+        print(f'{fileName} loaded as {type(data)}')
 
         return data
+def getTime():
+    return datetime.datetime.now()
+
+startW = getTime()
+print(f'### INITIALISING AT {startW} ###')
+lineNum = 1
+writeFile(lineNum, 'bandIDNow.json')
+#totalPersonnelData = []
+#writeFile(totalPersonnelData, 'totalPersonnel.json')
+
+switch = {'Full-length': 'album', 'Single': 'single', 'Demo': 'demo', 'EP': 'other', 'Split': 'other', 'Compilation': 'other', 'Boxed set': 'other'}
+flag1 = False
+flag2 = False
+flag3 = False
 
 def getHTML(url):
     page = requests.get(url)
-    if page.status_code != 403:
-        print(f'ERROR IN URL: {url}')
-        sys.exit()
+    #if page.status_code != 403:
+    #    print(f'ERROR IN URL: {url}')
+    #    sys.exit()
+    time.sleep(2)
     soup = BeautifulSoup(page.content, 'html.parser')
     return soup
 
@@ -44,6 +54,7 @@ def genreList():
     return genres
 
 def getPersonnelDetail(url):
+    print('Getting artist details...')
     id = url.split('/')[-1]
     soup = getHTML(url)
     cols = soup.find_all('dt')
@@ -68,7 +79,7 @@ def getPersonnelDetail(url):
         i += 1
     return personnelDict
 
-def getAlbumPersonnel(soup):
+def getAlbumPersonnel(soup, totalPersonnelData):
     personnelDiv = soup.find_all('div', {'id': 'album_all_members_lineup'})
     if personnelDiv == []:
         personnelDiv = soup.find_all('div', {'id': 'album_members_lineup'})
@@ -81,14 +92,14 @@ def getAlbumPersonnel(soup):
             personnelData = getPersonnelDetail(member['href'])
             totalPersonnelData.append(personnelData)
             personnelList.append([member.text.strip(), member['href'].split('/')[-1], role.text.strip()])
-    return personnelList
+    return personnelList, totalPersonnelData
 
-def getTracks(albumList, type):
+def getTracks(albumList, type, totalPersonnelData):
     albumLink = albumList.find_all('a', {'class': switch.get(type, 'other')})
     for album in albumLink:
         link = album['href']
     albumHTML = getHTML(link)
-    personnel = getAlbumPersonnel(albumHTML)
+    personnel, totalPersonnelData = getAlbumPersonnel(albumHTML, totalPersonnelData)
     trackNumList = []
     songList = []
     durationList = []
@@ -145,9 +156,9 @@ def getTracks(albumList, type):
     while i < len(trackNum):
         trackList.append([trackNum[i][0:1], song[i], duration[i], lyricsList[i]])
         i += 1
-    return personnel, trackList
+    return personnel, trackList, totalPersonnelData
 
-def getAlbums(url):
+def getAlbums(url, totalPersonnelData):
     soup = getHTML(url)
     discoDiv = soup.find_all('div', {'id': 'band_disco'})
     for div in discoDiv:
@@ -160,16 +171,20 @@ def getAlbums(url):
     albumList = albumListHTML.find_all('tr')
     albumList = albumList[1:] # remove column row from table
     albums = []
+
     for album in albumList:
         albumDetails = album.find_all('td')
+        if albumDetails[0].text.strip() == "Nothing entered yet. Please add the releases, if applicable.":
+            albums.append({'recName': 'None', 'recType': 'None', 'recYear': 'None', 'recTrackList': 'None', 'recPersonnelList': 'None'})
+            return soup, albums
         name = albumDetails[0].text.strip()
         type = albumDetails[1].text.strip()
         year = albumDetails[2].text.strip()
-        personnel, tracks = getTracks(album, type)
+        personnel, tracks, totalPersonnelData = getTracks(album, type, totalPersonnelData)
 
         albums.append({'recName': name, 'recType': type, 'recYear': year, 'recTrackList': tracks, 'recPersonnelList': personnel})
 
-    return soup, albums
+    return soup, albums, totalPersonnelData
 
 def getArtists(soup):
     artistList = soup.find_all('div', {'id': 'band_tab_members_all'})
@@ -191,8 +206,8 @@ def getArtists(soup):
             i += 1
         return artistInfo
 
-def getBand(url):
-    soup, albums = getAlbums(url)
+def getBand(url, totalPersonnelData):
+    soup, albums, totalPersonnelData = getAlbums(url, totalPersonnelData)
     artists = getArtists(soup)
     bandInfo = soup.find_all('div', {'id': 'band_info'})
     band = []
@@ -208,7 +223,7 @@ def getBand(url):
 
         band.append({'bandName': name, 'bandCountry': country, 'bandCity': city, 'bandStatus': status, 'bandFormed': formed, 'bandGenre': genre, 'bandLyricalThemes': lyricalThemes, 'bandMembers': artists, 'bandRecs': albums})
 
-        return band
+        return band, totalPersonnelData
 
 def printBandInfo(bandInfo):
     for details in bandInfo:
@@ -234,84 +249,125 @@ def printBandInfo(bandInfo):
 def printBandInfoShort(bandInfo):
     for details in bandInfo:
         print(f'Processed band \"{details["bandName"]}\", {len(details["bandMembers"])} artists, {len(details["bandRecs"])} albums')
-with open ('bands.csv', mode= 'r') as file:
+
+with open ('bands_TR.csv', mode= 'r') as file:
     reader = csv.reader(file)
-    data = list(reader)
-    totalLines = len(data)
+    bandData = list(reader)
+    totalLines = len(bandData)-1
+    i = 0
+    while i < len(bandData):
+        i += 1
+        #bandData[i] = bandData[i].strip().split(',')
 
-infoWriteOut = open('bandInfo.csv', 'w')
-writerInfo = csv.writer(infoWriteOut)
-writerInfo.writerow(['id', 'name', 'formedIn', 'city', 'country', 'genre', 'lyricalThemes', 'status', 'memberNames', 'albumNames'])
+def getBands():
+    with open ('bands_TR.csv', mode= 'r') as file:
+        csvReadFile = csv.reader(file)
+        lineNum = readFile('bandIDNow.json')
+        if lineNum == 1:
+            flag1 = True
+            flag2 = True
+            flag3 = True
+        else:
+            flag1 = False
+            flag2 = False
+            flag3 = False
 
-detailWriteOut = open('bandInfoDetail.csv', 'w')
-writerDetail = csv.writer(detailWriteOut)
-writerDetail.writerow(['id', 'name', 'formedIn', 'city', 'country', 'genre', 'lyricalThemes', 'status', 'memberName', 'memberID', 'memberRole', 'albumName', 'albumType', 'albumYear', 'albumTrackNumber', 'albumTrackName', 'albumTrackDuration', 'albumTrackLyrics'])
+        artistNum = 0
+        albumNum = 0
+        start = getTime()
+        print(f'Scraping started at {start}')
+        count = 0
 
-artistWriteOut = open('artistInfo.csv', 'w')
-artistDetail = csv.writer(artistWriteOut)
-artistDetail.writerow(['id', 'name', 'placeOfBirth', 'gender', 'age', 'band', 'album', 'role'])
+        while lineNum < len(bandData):
+            #totalPersonnelData = readFile('totalPersonnel.json')
+            totalPersonnelData = []
+            infoWriteOut = open('1-bandInfo.csv', 'a')
+            writerInfo = csv.writer(infoWriteOut)
+            if flag1:
+                writerInfo.writerow(['id', 'name', 'formedIn', 'city', 'country', 'genre', 'lyricalThemes', 'status', 'memberNames', 'albumNames'])
+                flag1 = False
 
-with open ('bands.csv', mode= 'r') as file:
-    csvReadFile = csv.reader(file)
-    lineNum = 1
-    artistNum = 0
-    albumNum = 0
-    start = getTime()
-    print(f'Scraping started at {start}')
-    for line in csvReadFile:
-        if line[0] != 'name':
-            print(f'Processing band #{lineNum} out of {totalLines} total')
-            id = line[1].replace(';', '')
-            url = 'https://www.metal-archives.com/band/view/id/' + id
-            bandInfo = getBand(url)
-            #printBandInfo(bandInfo)
-            printBandInfoShort(bandInfo)
+            detailWriteOut = open('2-bandInfoDetail.csv', 'a')
+            writerDetail = csv.writer(detailWriteOut)
+            if flag2:
+                writerDetail.writerow(['id', 'name', 'formedIn', 'city', 'country', 'genre', 'lyricalThemes', 'status', 'memberName', 'memberID', 'memberRole', 'albumName', 'albumType', 'albumYear', 'albumTrackNumber', 'albumTrackName', 'albumTrackDuration', 'albumTrackLyrics'])
+                flag2 = False
 
-            for details in bandInfo:
-                artistNum += len(details["bandMembers"])
-                albumNum += len(details["bandRecs"])
-                name = details["bandName"]
-                formed = details["bandFormed"]
-                city = details["bandCity"]
-                country = details["bandCountry"]
-                genre = details["bandGenre"]
-                lyrics = details["bandLyricalThemes"]
-                status = details["bandStatus"]
-                artists = "Members"
-                for artist in details['bandMembers']:
-                    artists = ", ".join([artists, artist[0]])
+            artistWriteOut = open('3-artistInfo.csv', 'a')
+            artistDetail = csv.writer(artistWriteOut)
+            if flag3:
+                artistDetail.writerow(['id', 'name', 'placeOfBirth', 'gender', 'age', 'band', 'album', 'role'])
+                flag3 = False
 
-                albums = "Albums"
-                for album in details['bandRecs']:
-                    albums = ", ".join([albums, album['recName']])
-                    albumName = album["recName"]
-                    albumType = album["recType"]
-                    albumYear = album["recYear"]
-                    for track in album['recTrackList']:
-                        albumTrackNumber = track[0]
-                        albumTrackName = track[1]
-                        albumTrackDuration = track[2]
-                        albumTrackLyrics = track[3]
-                        for person in album['recPersonnelList']:
-                            memberName = person[0]
-                            memberID = person[1]
-                            memberRole = person[2]
-                            writerDetail.writerow([id, name, formed, city, country, genre, lyrics, status, memberName, memberID, memberRole, albumName, albumType, albumYear, albumTrackNumber, albumTrackName, albumTrackDuration, albumTrackLyrics])
-            writerInfo.writerow([id, name, formed, city, country, genre, lyrics, status, artists, albums])
+            if bandData[lineNum][0] != 'name':
+                print(f'Processing band #{lineNum} out of {totalLines} total')
+                id = bandData[lineNum][1].replace(';', '')
+                print(f'Current ID:{id}')
+                url = 'https://www.metal-archives.com/band/view/id/' + id
+                bandInfo, totalPersonnelData = getBand(url, totalPersonnelData)
+                #printBandInfo(bandInfo)
+                printBandInfoShort(bandInfo)
 
+                for details in bandInfo:
+                    artistNum += len(details["bandMembers"])
+                    albumNum += len(details["bandRecs"])
+                    name = details["bandName"]
+                    formed = details["bandFormed"]
+                    city = details["bandCity"]
+                    country = details["bandCountry"]
+                    genre = details["bandGenre"]
+                    lyrics = details["bandLyricalThemes"]
+                    status = details["bandStatus"]
+                    artists = "Members"
+                    for artist in details['bandMembers']:
+                        artists = ", ".join([artists, artist[0]])
 
-            lineNum += 1
-        #if lineNum == 2:
-        #    break
+                    albums = "Albums"
+                    for album in details['bandRecs']:
+                        albums = ", ".join([albums, album['recName']])
+                        albumName = album["recName"]
+                        if albumName == 'None':
+                            break
+                        albumType = album["recType"]
+                        albumYear = album["recYear"]
+                        for track in album['recTrackList']:
+                            albumTrackNumber = track[0]
+                            albumTrackName = track[1]
+                            albumTrackDuration = track[2]
+                            albumTrackLyrics = track[3]
+                            for person in album['recPersonnelList']:
+                                memberName = person[0]
+                                memberID = person[1]
+                                memberRole = person[2]
+                                writerDetail.writerow([id, name, formed, city, country, genre, lyrics, status, memberName, memberID, memberRole, albumName, albumType, albumYear, albumTrackNumber, albumTrackName, albumTrackDuration, albumTrackLyrics])
+                writerInfo.writerow([id, name, formed, city, country, genre, lyrics, status, artists, albums])
+                infoWriteOut.close()
+                detailWriteOut.close()
 
-    for person in totalPersonnelData:
-        for band in person['Bands'].keys():
-            for role in person['Bands'][band]:
-                artistDetail.writerow([person['id'], person['Real/full name:'], person['Place of birth:'], person['Gender:'], person['Age:'], band, role[0], role[1]])
+                for person in totalPersonnelData:
+                    for band in person['Bands'].keys():
+                        for role in person['Bands'][band]:
+                            artistDetail.writerow([person['id'], person['Real/full name:'], person['Place of birth:'], person['Gender:'], person['Age:'], band, role[0], role[1]])
+                #writeFile(totalPersonnelData, 'totalPersonnel.json')
+                artistWriteOut.close()
 
-    infoWriteOut.close()
-    detailWriteOut.close()
-    artistWriteOut.close()
-    end = getTime()
-    #print(totalPersonnelData)
-    print(f'Scraping finished at {end}.\nProcessed {lineNum} bands, {artistNum} artists, {albumNum} albums.\nThis lasted (h:mm:ss): {(end-start)}.')
+                lineNum += 1
+                writeFile(lineNum, 'bandIDNow.json')
+                count += 1
+                #if lineNum == 7:
+                #    break
+                if count == 9:
+                    break
+
+            end = getTime()
+
+            print(f'Scraping finished at {end}.\nProcessed {lineNum-1} bands so far, {artistNum} artists, {albumNum} albums added this run.\nThis iteration lasted (h:mm:ss): {(end-start)}.')
+    return lineNum
+
+while True:
+    if lineNum < totalLines+1:
+        lineNum = getBands()
+    else:
+        break
+endW = getTime()
+print(f'Total process finished at {endW}.\nProcessed {lineNum-1} bands. \nWhole thing lasted (h:mm:ss): {(endW-startW)}.')
